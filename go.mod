@@ -1,4 +1,4 @@
-module kzg-demo
+module sendDADemo
 
 go 1.21.3
 
