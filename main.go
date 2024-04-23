@@ -3,16 +3,19 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/domicon-labs/kzg-sdk"
+	"log"
+	"math/big"
+	"time"
+
+	kzg_sdk "github.com/domicon-labs/kzg-sdk"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/rpc"
-	"log"
-	"math/big"
 )
 
 const dChunkSize = 30
@@ -36,10 +39,8 @@ func generateDA() *stDA {
 	}
 
 	fmt.Println("2. prepare test data ")
-	data := make([]byte, dChunkSize*17)
-	for i := range data {
-		data[i] = 1
-	}
+	data := make([]byte, 8)
+	binary.BigEndian.PutUint64(data, uint64(time.Now().Unix()))
 
 	log.Println("3. generate data commit")
 	length := len(data)
@@ -52,10 +53,10 @@ func generateDA() *stDA {
 	log.Println("commit data is:", digest.Bytes())
 	CM := digest.Bytes()
 	log.Println("cm:", hex.EncodeToString(CM[:]))
-	singer := kzg_sdk.NewEIP155FdSigner(big.NewInt(31337))
+	singer := kzg_sdk.NewEIP155FdSigner(big.NewInt(11155111))
 
-	// key, _ := crypto.GenerateKey()
-	pkBytes, err := hex.DecodeString("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+	uerPrivateKey := "e211013774caa4406301b9e509d62caf012c4cc91a9f16dd81f2f42bb764065f"
+	pkBytes, err := hex.DecodeString(uerPrivateKey)
 	if err != nil {
 		log.Println("DecodeString failed")
 		return nil
@@ -71,14 +72,15 @@ func generateDA() *stDA {
 	}
 	privateKey.PublicKey.X, privateKey.PublicKey.Y = privateKey.PublicKey.Curve.ScalarBaseMult(privateKey.D.Bytes())
 
-	senAddr := crypto.PubkeyToAddress(privateKey.PublicKey)
+	userAddr := crypto.PubkeyToAddress(privateKey.PublicKey)
 	privateKeyString := fmt.Sprintf("Private Key: %x", privateKey.D)
 	log.Println("key:", privateKeyString)
 
-	log.Println("senAddr----", senAddr.Hex())
+	log.Println("userAddr----", userAddr.Hex())
 
+	broadcaster := common.HexToAddress("0x1845b7295ae3EE0fc4b5fe60c05ea81637603764")
 	index := 1
-	_, sigData, err := kzg_sdk.SignFd(senAddr, senAddr, 0, uint64(index), uint64(length), CM[:], singer, privateKey)
+	_, sigData, err := kzg_sdk.SignFd(userAddr, broadcaster, 0, uint64(index), uint64(length), CM[:], singer, privateKey)
 	if err != nil {
 		log.Println("msg", "err", err)
 		return nil
@@ -88,8 +90,8 @@ func generateDA() *stDA {
 	return &stDA{
 		index:       uint64(index),
 		legth:       uint64(length),
-		broadcaster: senAddr,
-		user:        senAddr,
+		broadcaster: broadcaster,
+		user:        userAddr,
 		commitment:  hexutil.Bytes(CM[:]),
 		sign:        hexutil.Bytes(sigData),
 		data:        hexutil.Bytes(data),
@@ -97,7 +99,7 @@ func generateDA() *stDA {
 }
 
 func main() {
-	url := "http://127.0.0.1:8200"
+	url := "http://13.212.115.195:8547"
 	rpcCli, err := rpc.DialOptions(context.Background(), url)
 	if err != nil {
 		log.Println("msg", "err", err)
@@ -106,12 +108,12 @@ func main() {
 		log.Println("success")
 	}
 	rawDA := generateDA()
-	var result *[]byte
-	err = rpcCli.CallContext(context.Background(), result, "sendDA", rawDA.index, rawDA.legth, rawDA.broadcaster,
+	var result common.Hash
+	err = rpcCli.CallContext(context.Background(), &result, "optimism_sendDA", rawDA.index, rawDA.legth, 0, rawDA.broadcaster,
 		rawDA.user, rawDA.commitment, rawDA.sign, rawDA.data)
 	if err != nil {
 		log.Println("msg", "err", err)
 	} else {
-		log.Println("msg", "respose", result)
+		log.Println("msg", "tx hash", result)
 	}
 }
